@@ -1,6 +1,6 @@
 # GIGABYTE AERO X16 RGB Linux
 
-Control **GIGABYTE AERO X16 1VH** keyboard RGB lighting on Ubuntu Linux using the dedicated **Gimate** key. No GCC required.
+Control **GIGABYTE AERO X16 1VH** keyboard RGB lighting on Ubuntu Linux using the dedicated **Gimate** key. No GIGABYTE Control Center required.
 
 ## Introduction
 
@@ -21,7 +21,8 @@ This is my working method for controlling the keyboard RGB lighting on **Ubuntu*
 The setup allows you to control the keyboard lighting directly from Linux using the dedicated **Gimate** key, without needing Windows or GIGABYTE software.
 
 > **Tested and working on GIGABYTE AERO X16 1VH with Ubuntu Linux.**
-> Special thanks to ChatGPT for helping me figure this out and for helping me put this documentation together
+>
+> **Special thanks to ChatGPT for helping me figure this out and for helping me put this documentation together.**
 
 # GIGABYTE AERO X16 1VH RGB Keyboard Control on Linux
 
@@ -35,11 +36,14 @@ The setup was developed and tested on:
 * USB Product ID: `8104`
 * USB ID: `0414:8104`
 * HID device: `GIGABYTE USB-HID Keyboard`
+* HID Usage Page: `0x59` - LampArray
 * Keyboard event device used during testing: `/dev/input/event15`
+* Raw HID device used during testing: `/dev/hidraw10`
 * Gimate scan code: `0x70067`
 * Linux key code: `KEY_KPEQUAL` / `117`
+* Input interface: `4`
 
-> **Important:** `/dev/input/event15` is not guaranteed to be the same on every installation. Always find the correct event device with `evtest` instead of assuming it is `event15`.
+> **Important:** `/dev/input/event15` and `/dev/hidraw10` are installation-specific and may be different on another system. The stable identifiers are the USB VID/PID and the Gimate scan code.
 
 ---
 
@@ -55,13 +59,13 @@ The dedicated Gimate key works as an RGB controller:
 | Normal `=`       | Still works normally  |
 | Gimate itself    | Does **not** type `=` |
 
-### RGB modes
+## RGB modes
 
 * Static
 * Breathing
 * Rainbow
 
-### RGB colors
+## RGB colors
 
 * Red
 * Green
@@ -160,22 +164,23 @@ The USB device exposes several HID interfaces, so multiple `/dev/input/event*` d
 
 # 2. Install Required Packages
 
-Install the Python HID API:
+Install the required Python packages and `evtest`:
 
 ```bash
-sudo apt install python3-hidapi
+sudo apt update
+sudo apt install python3-evdev python3-hidapi evtest
 ```
 
-Install `evdev`:
+Verify `evdev`:
 
 ```bash
-sudo apt install python3-evdev
+python3 -c "import evdev; print('evdev OK')"
 ```
 
-Install `evtest`:
+Expected:
 
-```bash
-sudo apt install evtest
+```text
+evdev OK
 ```
 
 Verify `hidapi`:
@@ -188,18 +193,6 @@ Expected:
 
 ```text
 hidapi OK
-```
-
-Verify `evdev`:
-
-```bash
-python3 -c "import evdev; print(evdev)"
-```
-
-Expected output should look similar to:
-
-```text
-<module 'evdev' from '/usr/lib/python3/dist-packages/evdev/__init__.py'>
 ```
 
 ---
@@ -247,9 +240,13 @@ Gimate scan code = 0x70067
 Gimate Linux keycode = 117 / KEY_KPEQUAL
 ```
 
+> **Important:** Do not assume that `/dev/input/event15` will be the same on another installation. Use `evtest` to find the correct device.
+
 ---
 
 # 4. Give the RGB HID Device User Access
+
+The RGB script needs access to the GIGABYTE LampArray HID device.
 
 Create:
 
@@ -302,14 +299,14 @@ Use:
 SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_VENDOR_ID}=="0414", ENV{ID_MODEL_ID}=="8104", ENV{ID_INPUT_KEYBOARD}=="1", GROUP="plugdev", MODE="0660"
 ```
 
-Reload:
+Reload the rules:
 
 ```bash
 sudo udevadm control --reload-rules
 sudo udevadm trigger --subsystem-match=input
 ```
 
-Check:
+Check the device:
 
 ```bash
 ls -l /dev/input/event15
@@ -327,14 +324,28 @@ The important part is:
 root plugdev
 ```
 
+> If your keyboard uses a different event number, replace `event15` with the device found using `evtest`.
+
 ---
 
-# 6. RGB Control Script
+# 6. Install the RGB Control Script
 
-The RGB protocol is handled by:
+The repository contains:
 
 ```text
-~/.local/bin/aero_rgb.py
+scripts/aero_rgb.py
+```
+
+Create the local binary directory:
+
+```bash
+mkdir -p ~/.local/bin
+```
+
+Copy the script:
+
+```bash
+cp scripts/aero_rgb.py ~/.local/bin/aero_rgb.py
 ```
 
 Make it executable:
@@ -343,7 +354,7 @@ Make it executable:
 chmod +x ~/.local/bin/aero_rgb.py
 ```
 
-The script supports three modes:
+The RGB script supports three modes:
 
 ```text
 static
@@ -371,17 +382,41 @@ python3 ~/.local/bin/aero_rgb.py rainbow
 
 For `static` and `breathing`, colors are specified as hexadecimal RGB values.
 
+Press `Ctrl+C` to stop an animated mode.
+
 ---
 
-# 7. Gimate Daemon
+# 7. Install the Gimate Daemon
 
-The final daemon is:
+The repository contains:
 
 ```text
-~/.local/bin/aero-gimate
+scripts/aero-gimate
 ```
 
-It performs two main jobs:
+Copy it to the local binary directory:
+
+```bash
+cp scripts/aero-gimate ~/.local/bin/aero-gimate
+```
+
+Make it executable:
+
+```bash
+chmod +x ~/.local/bin/aero-gimate
+```
+
+The daemon automatically finds `aero_rgb.py` in the same directory.
+
+The final installation should therefore contain:
+
+```text
+~/.local/bin/
+├── aero-gimate
+└── aero_rgb.py
+```
+
+The daemon performs two main jobs:
 
 1. controls RGB;
 2. intercepts the physical Gimate key.
@@ -414,7 +449,13 @@ event.code == ecodes.KEY_KPEQUAL
 combined with:
 
 ```python
-last_scan == 0x70067
+last_scan == GIMATE_SCAN
+```
+
+where:
+
+```python
+GIMATE_SCAN = 0x70067
 ```
 
 This distinction is important because otherwise the normal `=` key would also be intercepted.
@@ -431,7 +472,7 @@ Check:
 ls -l /dev/uinput
 ```
 
-If necessary, create:
+Create the udev rule:
 
 ```bash
 sudo nano /etc/udev/rules.d/99-uinput.rules
@@ -443,10 +484,23 @@ Use:
 KERNEL=="uinput", GROUP="plugdev", MODE="0660"
 ```
 
-Reload:
+Reload the rules:
 
 ```bash
 sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+Check again:
+
+```bash
+ls -l /dev/uinput
+```
+
+Expected:
+
+```text
+crw-rw---- 1 root plugdev ... /dev/uinput
 ```
 
 On the tested system, `uinput` is built into the kernel, so:
@@ -457,18 +511,12 @@ lsmod | grep uinput
 
 may return nothing.
 
-That does not necessarily mean `uinput` is unavailable.
+That does not necessarily mean that `uinput` is unavailable.
 
 The important check is:
 
 ```bash
 ls -l /dev/uinput
-```
-
-Expected:
-
-```text
-crw-rw---- 1 root plugdev ... /dev/uinput
 ```
 
 ---
@@ -513,21 +561,58 @@ continues to work normally.
 
 ---
 
-# 10. Final Gimate Behavior
+# 10. Test the Gimate Daemon Manually
 
-### Gimate
+Before enabling systemd, test the daemon manually.
+
+Run:
+
+```bash
+~/.local/bin/aero-gimate
+```
+
+You should see something similar to:
+
+```text
+Opening: /dev/input/event15
+Name: GIGABYTE USB-HID Keyboard
+Keyboard grabbed.
+Gimate RGB daemon started
+```
+
+Now test:
+
+```text
+Gimate -> next color
+Shift + Gimate -> next mode
+Ctrl + Gimate -> RGB OFF
+```
+
+Also verify that the normal `=` key still types:
+
+```text
+=
+```
+
+Press `Ctrl+C` to stop the daemon.
+
+---
+
+# 11. Final Gimate Behavior
+
+## Gimate
 
 Changes the RGB color.
 
 `Gimate -> Red -> Green -> Blue -> Purple -> Yellow -> Cyan -> White -> Red -> ...`
 
-### Shift + Gimate
+## Shift + Gimate
 
 Changes the RGB mode.
 
 `Shift + Gimate -> Static -> Breathing -> Rainbow -> Static -> ...`
 
-### Ctrl + Gimate
+## Ctrl + Gimate
 
 Turns RGB off.
 
@@ -541,7 +626,7 @@ The above mappings are **tested and working on my GIGABYTE AERO X16 1VH**.
 
 ---
 
-# 11. RGB Process Handling
+# 12. RGB Process Handling
 
 The RGB script can run continuously for animated modes such as:
 
@@ -570,11 +655,249 @@ This prevents multiple RGB processes from controlling the keyboard at the same t
 
 ---
 
-# 12. systemd User Service
+# 13. systemd User Service
 
-To start the controller automatically after login:
+To start the controller automatically after login, copy the service file from the repository:
 
-Create:
-
-```ba
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/aero-gimate.service ~/.config/systemd/user/aero-gimate.service
 ```
+
+The service file is:
+
+```ini
+[Unit]
+Description=GIGABYTE AERO Gimate RGB Controller
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/aero-gimate
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+```
+
+Reload systemd:
+
+```bash
+systemctl --user daemon-reload
+```
+
+Enable the service:
+
+```bash
+systemctl --user enable aero-gimate.service
+```
+
+Start it:
+
+```bash
+systemctl --user start aero-gimate.service
+```
+
+Check the status:
+
+```bash
+systemctl --user status aero-gimate.service --no-pager
+```
+
+You should see:
+
+```text
+Active: active (running)
+```
+
+---
+
+# 14. Useful systemd Commands
+
+Start:
+
+```bash
+systemctl --user start aero-gimate.service
+```
+
+Stop:
+
+```bash
+systemctl --user stop aero-gimate.service
+```
+
+Restart:
+
+```bash
+systemctl --user restart aero-gimate.service
+```
+
+Check status:
+
+```bash
+systemctl --user status aero-gimate.service
+```
+
+View live logs:
+
+```bash
+journalctl --user -u aero-gimate.service -f
+```
+
+Disable automatic startup:
+
+```bash
+systemctl --user disable aero-gimate.service
+```
+
+---
+
+# 15. Troubleshooting
+
+## RGB device not found
+
+If you see:
+
+```text
+LampArray GIGABYTE 0414:8104 не найден.
+```
+
+Check:
+
+```bash
+lsusb
+```
+
+Make sure the device:
+
+```text
+0414:8104
+```
+
+is present.
+
+Then check:
+
+```bash
+ls -l /dev/hidraw*
+```
+
+and verify the udev rule is installed.
+
+Reload:
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+---
+
+## Permission denied on `/dev/hidraw*`
+
+Check:
+
+```bash
+ls -l /dev/hidraw*
+```
+
+The relevant device should belong to:
+
+```text
+root plugdev
+```
+
+Make sure your user is in `plugdev`:
+
+```bash
+groups
+```
+
+If necessary:
+
+```bash
+sudo usermod -aG plugdev "$USER"
+```
+
+Then log out and back in.
+
+---
+
+## Permission denied on `/dev/input/event*`
+
+Check:
+
+```bash
+ls -l /dev/input/event15
+```
+
+The relevant device should belong to:
+
+```text
+root plugdev
+```
+
+If the event number is different, find the correct device using:
+
+```bash
+sudo evtest
+```
+
+---
+
+## `/dev/uinput` permission denied
+
+Check:
+
+```bash
+ls -l /dev/uinput
+```
+
+Expected:
+
+```text
+crw-rw---- 1 root plugdev ... /dev/uinput
+```
+
+Reload the udev rules:
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+---
+
+## Gimate still types `=`
+
+Make sure the daemon is running:
+
+```bash
+systemctl --user status aero-gimate.service
+```
+
+Check the event:
+
+```bash
+sudo evtest /dev/input/event15
+```
+
+The Gimate key must report:
+
+```text
+MSC_SCAN = 0x70067
+KEY_KPEQUAL
+```
+
+The daemon must also be using the correct event device.
+
+---
+
+## Normal `=` key stops working
+
+Make sure you are using the final `aero-gimate` implementation.
+
+The daemon must:
+
+1. grab the physical key

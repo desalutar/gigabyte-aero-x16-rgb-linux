@@ -1,1 +1,282 @@
+```python
+#!/usr/bin/env python3
 
+import subprocess
+import time
+from pathlib import Path
+
+from evdev import InputDevice, UInput, ecodes
+
+
+# The keyboard event device may be different on another installation.
+# Find the correct device with evtest.
+DEVICE = "/dev/input/event15"
+
+# Gimate scan code observed on GIGABYTE AERO X16 1VH.
+GIMATE_SCAN = 0x70067
+
+# Find aero_rgb.py in the same directory as this script.
+SCRIPT_DIR = Path(__file__).resolve().parent
+RGB_SCRIPT = str(SCRIPT_DIR / "aero_rgb.py")
+
+
+COLORS = [
+    ("Red", "ff0000"),
+    ("Green", "00ff00"),
+    ("Blue", "0000ff"),
+    ("Purple", "8000ff"),
+    ("Yellow", "ffff00"),
+    ("Cyan", "00ffff"),
+    ("White", "ffffff"),
+]
+
+MODES = [
+    "static",
+    "breathing",
+    "rainbow",
+]
+
+
+color_index = 0
+mode_index = 0
+
+shift_down = False
+ctrl_down = False
+
+rgb_process = None
+
+
+def stop_rgb():
+    global rgb_process
+
+    if rgb_process is not None:
+
+        if rgb_process.poll() is None:
+            rgb_process.terminate()
+
+            try:
+                rgb_process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                rgb_process.kill()
+                rgb_process.wait()
+
+        rgb_process = None
+
+        # Give the HID device a short moment before starting
+        # the next RGB process.
+        time.sleep(0.1)
+
+
+def run_rgb():
+    global rgb_process
+
+    stop_rgb()
+
+    mode = MODES[mode_index]
+
+    if mode == "rainbow":
+
+        cmd = [
+            "python3",
+            RGB_SCRIPT,
+            "rainbow",
+        ]
+
+    else:
+
+        color = COLORS[color_index][1]
+
+        cmd = [
+            "python3",
+            RGB_SCRIPT,
+            mode,
+            color,
+        ]
+
+    rgb_process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def rgb_off():
+    global rgb_process
+
+    stop_rgb()
+
+    subprocess.run(
+        [
+            "python3",
+            RGB_SCRIPT,
+            "static",
+            "000000",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def handle_gimate():
+    global color_index
+    global mode_index
+
+    # Ctrl + Gimate = RGB OFF
+    if ctrl_down:
+
+        print(
+            "RGB: OFF",
+            flush=True,
+        )
+
+        rgb_off()
+        return
+
+    # Shift + Gimate = next RGB mode
+    if shift_down:
+
+        mode_index = (
+            mode_index + 1
+        ) % len(MODES)
+
+        print(
+            "Mode:",
+            MODES[mode_index],
+            flush=True,
+        )
+
+        run_rgb()
+        return
+
+    # Gimate = next RGB color
+    color_index = (
+        color_index + 1
+    ) % len(COLORS)
+
+    print(
+        "Color:",
+        COLORS[color_index][0],
+        flush=True,
+    )
+
+    run_rgb()
+
+
+def main():
+
+    global shift_down
+    global ctrl_down
+
+    device = InputDevice(DEVICE)
+
+    print(
+        "Opening:",
+        device.path,
+        flush=True,
+    )
+
+    print(
+        "Name:",
+        device.name,
+        flush=True,
+    )
+
+    ui = UInput.from_device(
+        device,
+        name="AERO X16 Gimate Remapper",
+    )
+
+    # Grab the physical keyboard so the original Gimate event
+    # does not reach the desktop as KEY_KPEQUAL (=).
+    device.grab()
+
+    print(
+        "Keyboard grabbed.",
+        flush=True,
+    )
+
+    print(
+        "Gimate RGB daemon started",
+        flush=True,
+    )
+
+    last_scan = None
+
+    try:
+
+        for event in device.read_loop():
+
+            # MSC_SCAN
+            if (
+                event.type == ecodes.EV_MSC
+                and event.code == ecodes.MSC_SCAN
+            ):
+
+                last_scan = event.value
+
+                # Do not forward MSC_SCAN.
+                continue
+
+            # EV_KEY
+            if event.type == ecodes.EV_KEY:
+
+                # Left Shift
+                if event.code == ecodes.KEY_LEFTSHIFT:
+                    shift_down = event.value != 0
+
+                # Right Shift
+                elif event.code == ecodes.KEY_RIGHTSHIFT:
+                    shift_down = event.value != 0
+
+                # Left Ctrl
+                elif event.code == ecodes.KEY_LEFTCTRL:
+                    ctrl_down = event.value != 0
+
+                # Right Ctrl
+                elif event.code == ecodes.KEY_RIGHTCTRL:
+                    ctrl_down = event.value != 0
+
+                # Gimate
+                if (
+                    event.code == ecodes.KEY_KPEQUAL
+                    and last_scan == GIMATE_SCAN
+                ):
+
+                    # React only to the key press.
+                    if event.value == 1:
+                        handle_gimate()
+
+                    # Completely suppress Gimate.
+                    last_scan = None
+                    continue
+
+            # Forward all other keyboard events.
+            ui.write(
+                event.type,
+                event.code,
+                event.value,
+            )
+
+            ui.syn()
+
+            last_scan = None
+
+    except KeyboardInterrupt:
+        pass
+
+    finally:
+
+        stop_rgb()
+
+        try:
+            device.ungrab()
+        except Exception:
+            pass
+
+        ui.close()
+        device.close()
+
+
+if __name__ == "__main__":
+    main()
+```

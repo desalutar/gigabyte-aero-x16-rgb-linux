@@ -1,1 +1,12 @@
+[Unit]
+Description=GIGABYTE AERO Gimate RGB Controller
+After=graphical-session.target
 
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/aero-gimate
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
